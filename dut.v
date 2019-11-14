@@ -247,28 +247,36 @@ endmodule
 //	--------------------------------------------------
 module	controller(
 		o_mode,
-		o_position,
+		o_position1,
+		o_position2,
 		o_sec_clk,
 		o_min_clk,
+		o_hour_clk,
 		i_max_hit_sec,
 		i_max_hit_min,
+		i_max_hit_hour,
 		i_sw0,
 		i_sw1,
 		i_sw2,
+		i_sw3,
 		clk,
 		rst_n);
 
 output		o_mode			;
-output		o_position		;
+output		o_position1		;
+output		o_position2		;
 output		o_sec_clk		;
 output		o_min_clk		;
+output		o_hour_clk		;
 
 input		i_max_hit_sec		;
 input		i_max_hit_min		;
+input		i_max_hit_hour		;
 
 input		i_sw0			;
 input		i_sw1			;
 input		i_sw2			;
+input		i_sw3			;
 
 input		clk			;
 input		rst_n			;
@@ -276,8 +284,9 @@ input		rst_n			;
 parameter	MODE_CLOCK = 1'b0	;
 parameter	MODE_SETUP = 1'b1	;
 
-parameter	POS_SEC	= 1'b0		;
-parameter	POS_MIN	= 1'b1		;
+parameter	POS_SEC = 2'b00		;
+parameter	POS_MIN	= 2'b01		;
+parameter	POS_HOUR = 2'b00	;
 
 wire		clk_100hz		;
 nco		u0_nco(
@@ -304,6 +313,12 @@ debounce	u2_debounce(
 		.i_sw		( i_sw2		),
 		.clk		( clk_100hz	));
 
+wire		sw3			;
+debounce	u3_debounce(
+		.o_sw		( sw3		),
+		.i_sw		( i_sw3		),
+		.clk		( clk_100hz	));
+
 reg		o_mode			;
 always @(posedge sw0 or negedge rst_n) begin
 	if(rst_n == 1'b0) begin
@@ -313,13 +328,23 @@ always @(posedge sw0 or negedge rst_n) begin
 	end
 end
 
-reg		o_position		;
+reg		o_position1		;
+reg		o_position2		;
+
 always @(posedge sw1 or negedge rst_n) begin
-	if(rst_n == 1'b0) begin
-		o_position <= POS_SEC;
-	end else begin
-		o_position <= o_position + 1'b1;
-	end
+		if(rst_n == 1'b0) begin
+			o_position1 <= POS_SEC;
+		end else begin
+			o_position1 <= o_position1 + 1'b1;
+		end
+end
+
+always @(posedge sw3 or negedge rst_n) begin
+		if(rst_n == 1'b0) begin
+			o_position2 <= POS_MIN;
+		end else begin
+			o_position2 <= o_position2 + 1'b1;
+		end
 end
 
 wire		clk_1hz			;
@@ -331,21 +356,31 @@ nco		u1_nco(
 
 reg		o_sec_clk		;
 reg		o_min_clk		;
+reg		o_hour_clk		;
 always @(*) begin
 	case(o_mode)
 		MODE_CLOCK : begin
 			o_sec_clk = clk_1hz;
 			o_min_clk = i_max_hit_sec;
+			o_hour_clk = i_max_hit_min;
 		end
 		MODE_SETUP : begin
-			case(o_position)
+			case(o_position1 & o_position2)
 				POS_SEC : begin
 					o_sec_clk = ~sw2;
 					o_min_clk = 1'b0;
+					o_hour_clk = 1'b0;
 				end
 				POS_MIN : begin
 					o_sec_clk = 1'b0;
 					o_min_clk = ~sw2;
+					o_hour_clk = 1'b0;
+
+				end
+				POS_HOUR : begin
+					o_sec_clk = 1'b0;
+					o_min_clk = 1'b0;
+					o_hour_clk = ~sw2 ;
 				end
 			endcase
 		end
@@ -359,20 +394,26 @@ endmodule
 //	--------------------------------------------------
 module	minsec(	o_sec,
 		o_min,
+		o_hour,
 		o_max_hit_sec,
 		o_max_hit_min,
+		o_max_hit_hour,
 		i_sec_clk,
 		i_min_clk,
+		i_hour_clk,
 		clk,
 		rst_n);
 
 output	[5:0]	o_sec		;
 output	[5:0]	o_min		;
+output	[5:0]	o_hour		;
 output		o_max_hit_sec	;
 output		o_max_hit_min	;
+output		o_max_hit_hour	;
 
 input		i_sec_clk	;
 input		i_min_clk	;
+input		i_hour_clk	;
 
 input		clk		;
 input		rst_n		;
@@ -391,7 +432,15 @@ hms_cnt		u1_hms_cnt(
 		.clk		( i_min_clk	),
 		.rst_n		( rst_n		));
 
+hms_cnt		u2_hms_cnt(
+		.o_hms_cnt	( o_hour	),
+		.o_max_hit	( o_max_hit_hour),
+		.i_max_cnt	( 6'd11		),
+		.clk		( i_hour_clk	),
+		.rst_n		( rst_n		));
+
 endmodule
+
 
 module	top_hms_clock(
 		o_seg_enb,
@@ -400,6 +449,7 @@ module	top_hms_clock(
 		i_sw0,
 		i_sw1,
 		i_sw2,
+		i_sw3,
 		clk,
 		rst_n);
 
@@ -410,16 +460,20 @@ output	[6:0]	o_seg		;
 input		i_sw0		;
 input		i_sw1		;
 input		i_sw2		;
+input		i_sw3		;
 input		clk		;
 input		rst_n		;
 
+wire		o_hour_clk	;
 wire		o_min_clk	;
 wire		o_sec_clk	;
 
 wire		o_max_hit_min	;
 wire		o_max_hit_sec	;
+wire		o_max_hit_hour	;
 wire	[5:0]	o_min		;
 wire	[5:0]	o_sec		;
+wire	[5:0]	o_hour		;
 
 wire	[3:0]	o_left0		;
 wire	[3:0]	o_right0	;
@@ -427,38 +481,48 @@ wire	[3:0]	o_right0	;
 wire	[3:0]	o_left1		;
 wire	[3:0]	o_right1	;
 
+wire	[3:0]	o_left2		;
+wire	[3:0]	o_right2	;
+
 wire	[6:0]	o_seg0		;
-
 wire	[6:0]	o_seg1		;
-
 wire	[6:0]	o_seg2		;
-
 wire	[6:0]	o_seg3		;
+wire	[6:0]	o_seg4		;
+wire	[6:0]	o_seg5		;
+
 
 wire	[41:0]	six_digit_seg	;
 
-assign		six_digit_seg = { {2{7'b0000000}}, o_seg2, o_seg3, o_seg0, o_seg1 } ;
+assign		six_digit_seg = { o_seg4, o_seg5, o_seg2, o_seg3, o_seg0, o_seg1 } ;
 	
 
 
 controller	u_ctrl	(	.o_mode		(),
-				.o_position	(),
+				.o_position1	(),
+				.o_position2	(),
 				.o_sec_clk	(	o_sec_clk	),
 				.o_min_clk	(	o_min_clk	),
+				.o_hour_clk	(	o_hour_clk	),
 				.i_max_hit_sec	(	o_max_hit_sec	),
 				.i_max_hit_min	(	o_max_hit_min	),
+				.i_max_hit_hour	(	o_max_hit_hour	),
 				.i_sw0		(	i_sw0		),
 				.i_sw1		(	i_sw1		),
 				.i_sw2		(	i_sw2		),
+				.i_sw3		(	i_sw3		),
 				.clk		(	clk		),
 				.rst_n		(	rst_n		));
 
 minsec		u_minsec(	.o_sec		(	o_sec		),
 				.o_min		(	o_min		),
+				.o_hour		(	o_hour		),
 				.o_max_hit_sec	(	o_max_hit_sec	),
 				.o_max_hit_min	(	o_max_hit_min	),
+				.o_max_hit_hour	(	o_max_hit_hour	),
 				.i_sec_clk	(	o_sec_clk	),
 				.i_min_clk	(	o_min_clk	),
+				.i_hour_clk	(	o_hour_clk	),
 				.clk		(	clk		),
 				.rst_n		(	rst_n		));
 
@@ -469,6 +533,10 @@ double_fig_sep	u0_dfs(		.o_left		(	o_left0		),
 double_fig_sep	u1_dfs(		.o_left		(	o_left1		),
 				.o_right	(	o_right1	),
 				.i_double_fig	(	o_min		));
+
+double_fig_sep	u2_dfs(		.o_left		(	o_left2		),
+				.o_right	(	o_right2	),
+				.i_double_fig	(	o_hour		));
 
 fnd_dec		u0_fnd_dec(	.o_seg		(	o_seg0		),
 				.i_num		(	o_left0		));
@@ -481,6 +549,12 @@ fnd_dec		u2_fnd_dec(	.o_seg		(	o_seg2		),
 
 fnd_dec		u3_fnd_dec(	.o_seg		(	o_seg3		),
 				.i_num		(	o_right1	));
+
+fnd_dec		u4_fnd_dec(	.o_seg		(	o_seg4		),
+				.i_num		(	o_left2		));
+
+fnd_dec		u5_fnd_dec(	.o_seg		(	o_seg5		),
+				.i_num		(	o_right2	));
 
 
 led_disp	u_led_disp(	.o_seg		(	o_seg		),
